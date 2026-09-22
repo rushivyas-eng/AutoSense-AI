@@ -25,3 +25,4 @@ dependencyResolutionManagement {
 rootProject.name = "AutoSense AI"
 include(":app")
 include(":autosense-api")
+include(":autosense-service")
