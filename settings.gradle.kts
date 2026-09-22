@@ -26,3 +26,6 @@ rootProject.name = "AutoSense AI"
 include(":app")
 include(":autosense-api")
 include(":autosense-service")
+include(":autosense-vehicle")
+include(":autosense-context")
+include(":autosense-action")
