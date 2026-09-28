@@ -10,6 +10,8 @@ android {
         }
     }
 
+    useLibrary("android.car")
+
     defaultConfig {
         minSdk = 29
 
