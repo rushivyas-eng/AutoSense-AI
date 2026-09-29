@@ -34,4 +34,5 @@ android {
 
 dependencies {
     implementation(project(":autosense-api"))
+    testImplementation(libs.junit)
 }
