@@ -2,7 +2,6 @@ package com.autosense.ai.camera
 
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraDevice
-import android.os.Handler
 import android.view.Surface
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -12,20 +11,33 @@ import org.junit.Test
 class CameraControllerTest {
 
     @Test
-    fun start_opensRequestedCamera() {
+    fun start_usesResolvedConfiguration() {
         val provider = FakeCameraDeviceProvider()
         val readerFactory = FakeCameraImageReaderFactory()
+        val configurationProvider =
+            FakeCameraConfigurationProvider()
 
         val controller = createController(
             provider = provider,
-            readerFactory = readerFactory
+            readerFactory = readerFactory,
+            configurationProvider = configurationProvider
         )
 
         controller.start()
 
         assertEquals(
-            "0",
+            "camera-1",
             provider.openedCameraId
+        )
+
+        assertEquals(
+            1280,
+            readerFactory.createdWidth
+        )
+
+        assertEquals(
+            720,
+            readerFactory.createdHeight
         )
 
         assertNotNull(
@@ -43,7 +55,9 @@ class CameraControllerTest {
     fun pollFrame_beforeStart_throws() {
         val controller = createController(
             provider = FakeCameraDeviceProvider(),
-            readerFactory = FakeCameraImageReaderFactory()
+            readerFactory = FakeCameraImageReaderFactory(),
+            configurationProvider =
+                FakeCameraConfigurationProvider()
         )
 
         try {
@@ -65,7 +79,9 @@ class CameraControllerTest {
     fun start_twice_throws() {
         val controller = createController(
             provider = FakeCameraDeviceProvider(),
-            readerFactory = FakeCameraImageReaderFactory()
+            readerFactory = FakeCameraImageReaderFactory(),
+            configurationProvider =
+                FakeCameraConfigurationProvider()
         )
 
         controller.start()
@@ -95,7 +111,9 @@ class CameraControllerTest {
 
         val controller = createController(
             provider = FakeCameraDeviceProvider(),
-            readerFactory = readerFactory
+            readerFactory = readerFactory,
+            configurationProvider =
+                FakeCameraConfigurationProvider()
         )
 
         controller.start()
@@ -113,7 +131,9 @@ class CameraControllerTest {
 
         val controller = createController(
             provider = FakeCameraDeviceProvider(),
-            readerFactory = readerFactory
+            readerFactory = readerFactory,
+            configurationProvider =
+                FakeCameraConfigurationProvider()
         )
 
         controller.start()
@@ -136,7 +156,9 @@ class CameraControllerTest {
 
         val controller = createController(
             provider = provider,
-            readerFactory = readerFactory
+            readerFactory = readerFactory,
+            configurationProvider =
+                FakeCameraConfigurationProvider()
         )
 
         controller.close()
@@ -152,17 +174,60 @@ class CameraControllerTest {
 
     private fun createController(
         provider: CameraDeviceProvider,
-        readerFactory: CameraImageReaderFactory
+        readerFactory: CameraImageReaderFactory,
+        configurationProvider: CameraConfigurationProvider
     ): CameraController {
         return CameraController(
             cameraDeviceProvider = provider,
             cameraImageReaderFactory = readerFactory,
-            cameraId = "0",
-            width = 1280,
-            height = 720,
+            cameraConfigurationProvider =
+                configurationProvider,
             frameAdapter = CameraFrameAdapter(),
             frameQueue = LatestFrameQueue()
         )
+    }
+
+    private class FakeCameraConfigurationProvider :
+        CameraConfigurationProvider {
+
+        override fun getConfiguration():
+                CameraConfiguration {
+            return CameraConfiguration(
+                cameraId = "camera-1",
+                width = 1280,
+                height = 720,
+                rotationDegrees = 90
+            )
+        }
+    }
+
+    private class FakeCameraImageReaderFactory :
+        CameraImageReaderFactory {
+
+        var createCount = 0
+
+        var createdWidth: Int? = null
+
+        var createdHeight: Int? = null
+
+        var createdReader: FakeCameraImageReader? = null
+
+        override fun create(
+            width: Int,
+            height: Int,
+            onImageAvailable:
+                (android.media.Image) -> Unit
+        ): CameraImageReaderHandle {
+
+            createCount++
+
+            createdWidth = width
+            createdHeight = height
+
+            return FakeCameraImageReader().also {
+                createdReader = it
+            }
+        }
     }
 
     private class FakeCameraDeviceProvider :
@@ -170,11 +235,11 @@ class CameraControllerTest {
 
         var openedCameraId: String? = null
 
-        var callback: CameraDevice.StateCallback? = null
+        var callback: CameraDeviceProvider.Callback? = null
 
         override fun openCamera(
             cameraId: String,
-            callback: CameraDevice.StateCallback
+            callback: CameraDeviceProvider.Callback
         ) {
             openedCameraId = cameraId
             this.callback = callback
@@ -183,7 +248,8 @@ class CameraControllerTest {
         override fun createCaptureSession(
             camera: CameraDevice,
             surface: Surface,
-            callback: CameraCaptureSession.StateCallback
+            callback:
+            CameraDeviceProvider.CaptureSessionCallback
         ) {
             throw UnsupportedOperationException(
                 "Capture session is not required by this test"
@@ -198,26 +264,6 @@ class CameraControllerTest {
             throw UnsupportedOperationException(
                 "Repeating capture is not required by this test"
             )
-        }
-    }
-
-    private class FakeCameraImageReaderFactory :
-        CameraImageReaderFactory {
-
-        var createCount = 0
-
-        var createdReader: FakeCameraImageReader? = null
-
-        override fun create(
-            width: Int,
-            height: Int,
-            onImageAvailable: (android.media.Image) -> Unit
-        ): CameraImageReaderHandle {
-            createCount++
-
-            return FakeCameraImageReader().also {
-                createdReader = it
-            }
         }
     }
 

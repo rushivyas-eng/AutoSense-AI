@@ -8,13 +8,14 @@ internal class FakeCameraDeviceProvider : CameraDeviceProvider {
 
     var openedCameraId: String? = null
 
-    var callback: CameraDevice.StateCallback? = null
+    var callback: CameraDeviceProvider.Callback? = null
 
     var captureSessionCamera: CameraDevice? = null
 
     var captureSessionSurface: Surface? = null
 
-    var captureSessionCallback: CameraCaptureSession.StateCallback? = null
+    var captureSessionCallback:
+            CameraDeviceProvider.CaptureSessionCallback? = null
 
     var repeatingCaptureCamera: CameraDevice? = null
 
@@ -24,7 +25,7 @@ internal class FakeCameraDeviceProvider : CameraDeviceProvider {
 
     override fun openCamera(
         cameraId: String,
-        callback: CameraDevice.StateCallback
+        callback: CameraDeviceProvider.Callback
     ) {
         openedCameraId = cameraId
         this.callback = callback
@@ -33,7 +34,7 @@ internal class FakeCameraDeviceProvider : CameraDeviceProvider {
     override fun createCaptureSession(
         camera: CameraDevice,
         surface: Surface,
-        callback: CameraCaptureSession.StateCallback
+        callback: CameraDeviceProvider.CaptureSessionCallback
     ) {
         captureSessionCamera = camera
         captureSessionSurface = surface

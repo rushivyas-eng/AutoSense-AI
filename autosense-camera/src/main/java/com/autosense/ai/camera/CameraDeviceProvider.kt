@@ -6,15 +6,42 @@ import android.view.Surface
 
 internal interface CameraDeviceProvider {
 
+    interface Callback {
+
+        fun onOpened(
+            camera: CameraDevice
+        )
+
+        fun onDisconnected(
+            camera: CameraDevice
+        )
+
+        fun onError(
+            camera: CameraDevice,
+            error: Int
+        )
+    }
+
+    interface CaptureSessionCallback {
+
+        fun onConfigured(
+            session: CameraCaptureSession
+        )
+
+        fun onConfigureFailed(
+            session: CameraCaptureSession
+        )
+    }
+
     fun openCamera(
         cameraId: String,
-        callback: CameraDevice.StateCallback
+        callback: Callback
     )
 
     fun createCaptureSession(
         camera: CameraDevice,
         surface: Surface,
-        callback: CameraCaptureSession.StateCallback
+        callback: CaptureSessionCallback
     )
 
     fun startRepeatingCapture(

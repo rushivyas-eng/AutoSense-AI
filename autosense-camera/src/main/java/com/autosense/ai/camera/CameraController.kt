@@ -7,9 +7,7 @@ import com.autosense.ai.api.camera.CameraFrame
 internal class CameraController(
     private val cameraDeviceProvider: CameraDeviceProvider,
     private val cameraImageReaderFactory: CameraImageReaderFactory,
-    private val cameraId: String,
-    private val width: Int,
-    private val height: Int,
+    private val cameraConfigurationProvider: CameraConfigurationProvider,
     private val frameAdapter: CameraFrameAdapter,
     private val frameQueue: LatestFrameQueue
 ) : AutoCloseable {
@@ -20,62 +18,14 @@ internal class CameraController(
 
     private var imageReader: CameraImageReaderHandle? = null
 
+    private var configuration: CameraConfiguration? = null
+
     private var sequenceNumber = 0L
 
     private var started = false
 
-    fun start() {
-        check(!started) {
-            "CameraController is already started"
-        }
-
-        imageReader = cameraImageReaderFactory.create(
-            width = width,
-            height = height,
-            onImageAvailable = ::handleImage
-        )
-
-        started = true
-
-        cameraDeviceProvider.openCamera(
-            cameraId = cameraId,
-            callback = cameraStateCallback
-        )
-    }
-
-    fun pollFrame(): CameraFrame? {
-        check(started) {
-            "CameraController is not started"
-        }
-
-        return frameQueue.poll()
-    }
-
-    fun stop() {
-        if (!started) {
-            return
-        }
-
-        started = false
-
-        captureSession?.close()
-        captureSession = null
-
-        cameraDevice?.close()
-        cameraDevice = null
-
-        imageReader?.close()
-        imageReader = null
-
-        frameQueue.close()
-    }
-
-    override fun close() {
-        stop()
-    }
-
-    private val cameraStateCallback =
-        object : CameraDevice.StateCallback() {
+    private val cameraCallback =
+        object : CameraDeviceProvider.Callback {
 
             override fun onOpened(
                 camera: CameraDevice
@@ -116,6 +66,63 @@ internal class CameraController(
             }
         }
 
+    fun start() {
+        check(!started) {
+            "CameraController is already started"
+        }
+
+        val resolvedConfiguration =
+            cameraConfigurationProvider.getConfiguration()
+
+        configuration = resolvedConfiguration
+
+        imageReader = cameraImageReaderFactory.create(
+            width = resolvedConfiguration.width,
+            height = resolvedConfiguration.height,
+            onImageAvailable = ::handleImage
+        )
+
+        started = true
+
+        cameraDeviceProvider.openCamera(
+            cameraId = resolvedConfiguration.cameraId,
+            callback = cameraCallback
+        )
+    }
+
+    fun pollFrame(): CameraFrame? {
+        check(started) {
+            "CameraController is not started"
+        }
+
+        return frameQueue.poll()
+    }
+
+    fun stop() {
+        if (!started) {
+            return
+        }
+
+        started = false
+
+        captureSession?.close()
+        captureSession = null
+
+        cameraDevice?.close()
+        cameraDevice = null
+
+        imageReader?.close()
+        imageReader = null
+
+        configuration = null
+
+        frameQueue.close()
+    }
+
+    override fun close() {
+        stop()
+    }
+
     private fun createCaptureSession(
         camera: CameraDevice
     ) {
@@ -132,7 +139,8 @@ internal class CameraController(
         cameraDeviceProvider.createCaptureSession(
             camera = camera,
             surface = reader.surface,
-            callback = object : CameraCaptureSession.StateCallback() {
+            callback = object :
+                CameraDeviceProvider.CaptureSessionCallback {
 
                 override fun onConfigured(
                     session: CameraCaptureSession
@@ -168,10 +176,13 @@ internal class CameraController(
         image: android.media.Image
     ) {
         try {
+            val rotationDegrees =
+                configuration?.rotationDegrees ?: 0
+
             val frame = frameAdapter.adapt(
                 image = image,
                 sequenceNumber = sequenceNumber++,
-                rotationDegrees = 0
+                rotationDegrees = rotationDegrees
             )
 
             frameQueue.offer(frame)

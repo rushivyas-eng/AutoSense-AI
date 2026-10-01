@@ -15,11 +15,34 @@ internal class AndroidCameraDeviceProvider(
     @SuppressLint("MissingPermission")
     override fun openCamera(
         cameraId: String,
-        callback: CameraDevice.StateCallback
+        callback: CameraDeviceProvider.Callback
     ) {
         cameraManager.openCamera(
             cameraId,
-            callback,
+            object : CameraDevice.StateCallback() {
+
+                override fun onOpened(
+                    camera: CameraDevice
+                ) {
+                    callback.onOpened(camera)
+                }
+
+                override fun onDisconnected(
+                    camera: CameraDevice
+                ) {
+                    callback.onDisconnected(camera)
+                }
+
+                override fun onError(
+                    camera: CameraDevice,
+                    error: Int
+                ) {
+                    callback.onError(
+                        camera,
+                        error
+                    )
+                }
+            },
             handler
         )
     }
@@ -27,11 +50,24 @@ internal class AndroidCameraDeviceProvider(
     override fun createCaptureSession(
         camera: CameraDevice,
         surface: Surface,
-        callback: CameraCaptureSession.StateCallback
+        callback: CameraDeviceProvider.CaptureSessionCallback
     ) {
         camera.createCaptureSession(
             listOf(surface),
-            callback,
+            object : CameraCaptureSession.StateCallback() {
+
+                override fun onConfigured(
+                    session: CameraCaptureSession
+                ) {
+                    callback.onConfigured(session)
+                }
+
+                override fun onConfigureFailed(
+                    session: CameraCaptureSession
+                ) {
+                    callback.onConfigureFailed(session)
+                }
+            },
             handler
         )
     }
