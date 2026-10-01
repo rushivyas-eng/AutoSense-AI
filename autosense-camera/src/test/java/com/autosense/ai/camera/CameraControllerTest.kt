@@ -126,6 +126,49 @@ class CameraControllerTest {
     }
 
     @Test
+    fun stop_twice_isSafe() {
+        val readerFactory = FakeCameraImageReaderFactory()
+
+        val controller = createController(
+            provider = FakeCameraDeviceProvider(),
+            readerFactory = readerFactory,
+            configurationProvider =
+                FakeCameraConfigurationProvider()
+        )
+
+        controller.start()
+
+        controller.stop()
+        controller.stop()
+
+        assertEquals(
+            1,
+            readerFactory.createdReader?.closeCount
+        )
+    }
+
+    @Test
+    fun close_afterStart_closesResources() {
+        val readerFactory = FakeCameraImageReaderFactory()
+
+        val controller = createController(
+            provider = FakeCameraDeviceProvider(),
+            readerFactory = readerFactory,
+            configurationProvider =
+                FakeCameraConfigurationProvider()
+        )
+
+        controller.start()
+
+        controller.close()
+
+        assertEquals(
+            1,
+            readerFactory.createdReader?.closeCount
+        )
+    }
+
+    @Test
     fun stop_allowsRestart() {
         val readerFactory = FakeCameraImageReaderFactory()
 

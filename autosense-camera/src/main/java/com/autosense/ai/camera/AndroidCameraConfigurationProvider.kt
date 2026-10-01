@@ -53,7 +53,9 @@ internal class AndroidCameraConfigurationProvider(
             cameraId = camera.cameraId,
             width = selectedSize.width,
             height = selectedSize.height,
-            rotationDegrees = sensorOrientation
+            rotationDegrees = CameraRotation.normalize(
+                sensorOrientation
+            )
         )
     }
 }
