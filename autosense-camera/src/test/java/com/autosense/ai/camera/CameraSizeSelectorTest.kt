@@ -1,19 +1,20 @@
 package com.autosense.ai.camera
 
-import org.junit.Assert.assertEquals
 import org.junit.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 class CameraSizeSelectorTest {
 
     @Test
-    fun exactMatch_isSelected() {
+    fun exactResolution_isPreferred() {
         val sizes = listOf(
             CameraOutputSize(1920, 1080),
             CameraOutputSize(1280, 720),
             CameraOutputSize(640, 480)
         )
 
-        val result =
+        val selected =
             CameraSizeSelector.select(
                 outputSizes = sizes,
                 requestedWidth = 1280,
@@ -22,19 +23,19 @@ class CameraSizeSelectorTest {
 
         assertEquals(
             CameraOutputSize(1280, 720),
-            result
+            selected
         )
     }
 
     @Test
-    fun closestArea_isSelectedWhenExactMatchMissing() {
+    fun sameAspectRatio_isPreferredOverDifferentAspectRatio() {
         val sizes = listOf(
+            CameraOutputSize(1280, 960),
             CameraOutputSize(1920, 1080),
-            CameraOutputSize(1280, 800),
-            CameraOutputSize(640, 480)
+            CameraOutputSize(1024, 768)
         )
 
-        val result =
+        val selected =
             CameraSizeSelector.select(
                 outputSizes = sizes,
                 requestedWidth = 1280,
@@ -42,49 +43,87 @@ class CameraSizeSelectorTest {
             )
 
         assertEquals(
-            CameraOutputSize(1280, 800),
-            result
+            CameraOutputSize(1920, 1080),
+            selected
         )
     }
 
     @Test
-    fun emptySizes_throws() {
-        try {
+    fun sameAspectRatio_selectsClosestArea() {
+        val sizes = listOf(
+            CameraOutputSize(2560, 1440),
+            CameraOutputSize(1920, 1080),
+            CameraOutputSize(640, 360)
+        )
+
+        val selected =
+            CameraSizeSelector.select(
+                outputSizes = sizes,
+                requestedWidth = 1280,
+                requestedHeight = 720
+            )
+
+        assertEquals(
+            CameraOutputSize(640, 360),
+            selected
+        )
+    }
+
+    @Test
+    fun differentAspectRatio_isUsedWhenNoSameAspectRatioExists() {
+        val sizes = listOf(
+            CameraOutputSize(1280, 960),
+            CameraOutputSize(640, 480),
+            CameraOutputSize(1920, 1440)
+        )
+
+        val selected =
+            CameraSizeSelector.select(
+                outputSizes = sizes,
+                requestedWidth = 1280,
+                requestedHeight = 720
+            )
+
+        assertEquals(
+            CameraOutputSize(1280, 960),
+            selected
+        )
+    }
+
+    @Test
+    fun emptyOutputSizes_throws() {
+        assertFailsWith<IllegalArgumentException> {
             CameraSizeSelector.select(
                 outputSizes = emptyList(),
                 requestedWidth = 1280,
                 requestedHeight = 720
             )
-        } catch (exception: IllegalArgumentException) {
-            assertEquals(
-                "Camera does not support YUV_420_888 output",
-                exception.message
-            )
-            return
         }
-
-        throw AssertionError(
-            "Expected IllegalArgumentException"
-        )
     }
 
     @Test
-    fun requestedSize_largerThanAvailable_selectsClosestArea() {
-        val sizes = listOf(
-            CameraOutputSize(640, 480),
-            CameraOutputSize(1280, 720)
-        )
-
-        val result =
+    fun invalidRequestedWidth_throws() {
+        assertFailsWith<IllegalArgumentException> {
             CameraSizeSelector.select(
-                outputSizes = sizes,
-                requestedWidth = 1920,
-                requestedHeight = 1080
+                outputSizes = listOf(
+                    CameraOutputSize(1280, 720)
+                ),
+                requestedWidth = 0,
+                requestedHeight = 720
             )
+        }
+    }
 
-        assertEquals(
-            CameraOutputSize(1280, 720),
-            result
-        )
+    @Test
+    fun invalidRequestedHeight_throws() {
+        assertFailsWith<IllegalArgumentException> {
+            CameraSizeSelector.select(
+                outputSizes = listOf(
+                    CameraOutputSize(1280, 720)
+                ),
+                requestedWidth = 1280,
+                requestedHeight = 0
+            )
+        }
     }
 }

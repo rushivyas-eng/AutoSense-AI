@@ -5,16 +5,21 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 
 internal class AndroidCameraConfigurationProvider(
+    private val cameraDescriptorProvider: AndroidCameraDescriptorProvider,
     private val cameraManager: CameraManager,
-    private val cameraId: String,
     private val requestedWidth: Int,
     private val requestedHeight: Int
 ) : CameraConfigurationProvider {
 
     override fun getConfiguration(): CameraConfiguration {
+        val camera =
+            CameraSelector.select(
+                cameraDescriptorProvider.getDescriptors()
+            )
+
         val characteristics =
             cameraManager.getCameraCharacteristics(
-                cameraId
+                camera.cameraId
             )
 
         val sensorOrientation =
@@ -45,7 +50,7 @@ internal class AndroidCameraConfigurationProvider(
             )
 
         return CameraConfiguration(
-            cameraId = cameraId,
+            cameraId = camera.cameraId,
             width = selectedSize.width,
             height = selectedSize.height,
             rotationDegrees = sensorOrientation
