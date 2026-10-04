@@ -34,6 +34,8 @@ android {
 
 dependencies {
     implementation(project(":autosense-api"))
+    implementation("com.google.ai.edge.litert:litert:2.2.0")
     testImplementation(kotlin("test"))
     testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit)
 }
