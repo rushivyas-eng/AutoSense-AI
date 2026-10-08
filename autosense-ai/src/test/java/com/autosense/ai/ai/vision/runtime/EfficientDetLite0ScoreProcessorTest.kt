@@ -291,10 +291,11 @@ class EfficientDetLite0ScoreProcessorTest {
     }
 
     @Test
-    fun process_allZeroLogitsProduceHalfConfidence() {
+    fun process_allZeroLogitsFilterBackgroundClass() {
         /*
          * This test intentionally uses every class = 0.
-         * Therefore class 0 wins the tie.
+         * Class 0 wins the tie, but class 0 is EfficientDet's
+         * background class and must not produce a detection.
          */
         val scores = FloatArray(
             EfficientDetLite0ModelContract.CLASSIFICATION_OUTPUT_ANCHORS *
@@ -308,15 +309,102 @@ class EfficientDetLite0ScoreProcessorTest {
 
         val result = processor.process(scores)
 
+        assertNull(result[0])
+    }
+
+    @Test
+    fun process_backgroundHighestDoesNotProduceCandidate() {
+        val scores = createScores()
+
+        setScore(
+            scores = scores,
+            anchorIndex = 0,
+            classId = 0,
+            score = 10.0f
+        )
+
+        setScore(
+            scores = scores,
+            anchorIndex = 0,
+            classId = 1,
+            score = 5.0f
+        )
+
+        val processor =
+            EfficientDetLite0ScoreProcessor(
+                scoreThreshold = 0.0f
+            )
+
+        val result = processor.process(scores)
+
+        assertNull(result[0])
+    }
+
+    @Test
+    fun process_foregroundClassWinsOverBackground() {
+        val scores = createScores()
+
+        setScore(
+            scores = scores,
+            anchorIndex = 0,
+            classId = 0,
+            score = 5.0f
+        )
+
+        setScore(
+            scores = scores,
+            anchorIndex = 0,
+            classId = 3,
+            score = 10.0f
+        )
+
+        val processor =
+            EfficientDetLite0ScoreProcessor(
+                scoreThreshold = 0.0f
+            )
+
+        val result = processor.process(scores)
+
         assertEquals(
-            0,
+            3,
             result[0]?.classId
         )
 
         assertEquals(
-            0.5f,
-            result[0]?.score ?: Float.NaN,
-            EPSILON
+            sigmoid(10.0),
+            result[0]?.score?.toDouble() ?: Double.NaN,
+            EPSILON_DOUBLE
+        )
+    }
+
+    @Test
+    fun process_foregroundClass89IsPreserved() {
+        val scores = createScores()
+
+        setScore(
+            scores = scores,
+            anchorIndex = 0,
+            classId = 0,
+            score = 1.0f
+        )
+
+        setScore(
+            scores = scores,
+            anchorIndex = 0,
+            classId = 89,
+            score = 2.0f
+        )
+
+        val processor =
+            EfficientDetLite0ScoreProcessor(
+                scoreThreshold = 0.0f
+            )
+
+        val result = processor.process(scores)
+
+        assertEquals(
+            89,
+            result[0]?.classId
         )
     }
 

@@ -57,6 +57,10 @@ internal class EfficientDetLite0ScoreProcessor(
                 }
             }
 
+            if (bestClassId == BACKGROUND_CLASS_ID) {
+                continue
+            }
+
             val confidence =
                 sigmoid(bestLogit)
 
@@ -105,6 +109,8 @@ internal class EfficientDetLite0ScoreProcessor(
     }
 
     companion object {
+        private const val BACKGROUND_CLASS_ID = 0
+
         /*
          * Keep the model post-processing threshold configurable.
          *
