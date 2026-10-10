@@ -1,63 +1,109 @@
 package com.autosense.ai.ai.vision.runtime
 
 import android.content.Context
-import com.google.ai.edge.litert.CompiledModel
-import com.google.ai.edge.litert.TensorBuffer
-import com.google.ai.edge.litert.TensorType
+import org.tensorflow.lite.DataType
+import org.tensorflow.lite.Interpreter
+import java.io.Closeable
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
-/**
- * Android-specific LiteRT implementation for EfficientDet-Lite0.
- *
- * Tensor buffers are allocated once and reused for each inference.
- *
- * Input and output buffers are addressed by tensor name so the runtime
- * does not depend on the ordering of buffers returned by the model.
- */
 internal class AndroidLiteRtModelRunner(
     context: Context
 ) : LiteRtModelRunner {
 
-    private val model: CompiledModel
+    private val interpreter: Interpreter
 
-    private val inputBuffers: Map<String, TensorBuffer>
-    private val outputBuffers: Map<String, TensorBuffer>
+    private val inputBuffer: ByteBuffer
+
+    private val classificationScores: Array<Array<FloatArray>>
+
+    private val boxRegression: Array<Array<FloatArray>>
+
+    private val classificationOutputIndex: Int
+
+    private val boxOutputIndex: Int
 
     init {
-        model = CompiledModel.create(
-            context.assets,
-            EfficientDetLite0ModelContract.MODEL_ASSET_NAME,
-            CompiledModel.Options.CPU
+        val modelBuffer = loadModelBuffer(context)
+
+        interpreter = Interpreter(
+            modelBuffer,
+            Interpreter.Options().setNumThreads(4)
         )
 
         try {
-            validateTensorContract()
+            validateInputTensor()
 
-            inputBuffers = mapOf(
-                EfficientDetLite0ModelContract.INPUT_TENSOR_NAME to
-                        model.createInputBuffer(
-                            EfficientDetLite0ModelContract.INPUT_TENSOR_NAME
-                        )
-            )
+            classificationOutputIndex =
+                findOutputIndex(
+                    expectedName =
+                        EfficientDetLite0ModelContract
+                            .CLASSIFICATION_OUTPUT_TENSOR_NAME,
+                    expectedShape = intArrayOf(
+                        1,
+                        EfficientDetLite0ModelContract
+                            .CLASSIFICATION_OUTPUT_ANCHORS,
+                        EfficientDetLite0ModelContract
+                            .CLASSIFICATION_OUTPUT_CLASSES
+                    )
+                )
 
-            outputBuffers = mapOf(
-                EfficientDetLite0ModelContract.CLASSIFICATION_OUTPUT_TENSOR_NAME to
-                        model.createOutputBuffer(
-                            EfficientDetLite0ModelContract
-                                .CLASSIFICATION_OUTPUT_TENSOR_NAME
-                        ),
+            boxOutputIndex =
+                findOutputIndex(
+                    expectedName =
+                        EfficientDetLite0ModelContract
+                            .BOX_OUTPUT_TENSOR_NAME,
+                    expectedShape = intArrayOf(
+                        1,
+                        EfficientDetLite0ModelContract
+                            .BOX_OUTPUT_ANCHORS,
+                        EfficientDetLite0ModelContract
+                            .BOX_OUTPUT_VALUES
+                    )
+                )
 
-                EfficientDetLite0ModelContract.BOX_OUTPUT_TENSOR_NAME to
-                        model.createOutputBuffer(
-                            EfficientDetLite0ModelContract.BOX_OUTPUT_TENSOR_NAME
-                        )
-            )
+            require(classificationOutputIndex != boxOutputIndex) {
+                "Classification and box outputs resolved to the same index"
+            }
+
+            classificationScores = Array(1) {
+                Array(
+                    EfficientDetLite0ModelContract
+                        .CLASSIFICATION_OUTPUT_ANCHORS
+                ) {
+                    FloatArray(
+                        EfficientDetLite0ModelContract
+                            .CLASSIFICATION_OUTPUT_CLASSES
+                    )
+                }
+            }
+
+            boxRegression = Array(1) {
+                Array(
+                    EfficientDetLite0ModelContract
+                        .BOX_OUTPUT_ANCHORS
+                ) {
+                    FloatArray(
+                        EfficientDetLite0ModelContract
+                            .BOX_OUTPUT_VALUES
+                    )
+                }
+            }
+
+            inputBuffer = ByteBuffer.allocateDirect(
+                EfficientDetLite0ModelContract.INPUT_WIDTH *
+                        EfficientDetLite0ModelContract.INPUT_HEIGHT *
+                        EfficientDetLite0ModelContract.INPUT_CHANNELS
+            ).order(ByteOrder.nativeOrder())
         } catch (exception: Exception) {
-            model.close()
+            interpreter.close()
             throw exception
         }
     }
 
-    override fun run(input: ByteArray): EfficientDetLite0RawOutput {
+    override fun run(
+        input: ByteArray
+    ): EfficientDetLite0RawOutput {
         val expectedInputSize =
             EfficientDetLite0ModelContract.INPUT_WIDTH *
                     EfficientDetLite0ModelContract.INPUT_HEIGHT *
@@ -68,129 +114,140 @@ internal class AndroidLiteRtModelRunner(
                     "expected $expectedInputSize"
         }
 
-        val inputBuffer = requireNotNull(
-            inputBuffers[
-                EfficientDetLite0ModelContract.INPUT_TENSOR_NAME
-            ]
-        ) {
-            "EfficientDet input buffer is unavailable"
-        }
+        inputBuffer.clear()
+        inputBuffer.put(input)
+        inputBuffer.rewind()
 
-        inputBuffer.writeInt8(input)
+        val outputs = mutableMapOf<Int, Any>(
+            classificationOutputIndex to classificationScores,
+            boxOutputIndex to boxRegression
+        )
 
         val startNanos = System.nanoTime()
 
-        model.run(
-            inputBuffers,
-            outputBuffers
+        interpreter.runForMultipleInputsOutputs(
+            arrayOf(inputBuffer),
+            outputs
         )
 
         val inferenceTimeMs =
             (System.nanoTime() - startNanos) / 1_000_000L
 
-        val classificationScores = requireNotNull(
-            outputBuffers[
-                EfficientDetLite0ModelContract
-                    .CLASSIFICATION_OUTPUT_TENSOR_NAME
-            ]
-        ) {
-            "Classification output buffer is unavailable"
-        }.readFloat()
+        val flatClassificationScores = FloatArray(
+            EfficientDetLite0ModelContract.CLASSIFICATION_OUTPUT_ANCHORS *
+                    EfficientDetLite0ModelContract.CLASSIFICATION_OUTPUT_CLASSES
+        )
 
-        val boxRegression = requireNotNull(
-            outputBuffers[
-                EfficientDetLite0ModelContract.BOX_OUTPUT_TENSOR_NAME
-            ]
-        ) {
-            "Box-regression output buffer is unavailable"
-        }.readFloat()
+        var classificationOffset = 0
+
+        for (anchorScores in classificationScores[0]) {
+            anchorScores.copyInto(
+                destination = flatClassificationScores,
+                destinationOffset = classificationOffset
+            )
+
+            classificationOffset += anchorScores.size
+        }
+
+        val flatBoxRegression = FloatArray(
+            EfficientDetLite0ModelContract.BOX_OUTPUT_ANCHORS *
+                    EfficientDetLite0ModelContract.BOX_OUTPUT_VALUES
+        )
+
+        var boxOffset = 0
+
+        for (boxValues in boxRegression[0]) {
+            boxValues.copyInto(
+                destination = flatBoxRegression,
+                destinationOffset = boxOffset
+            )
+
+            boxOffset += boxValues.size
+        }
 
         return EfficientDetLite0RawOutput(
-            classificationScores = classificationScores,
-            boxRegression = boxRegression,
+            classificationScores = flatClassificationScores,
+            boxRegression = flatBoxRegression,
             inferenceTimeMs = inferenceTimeMs
         )
     }
 
-    /**
-     * Verifies the tensor names, shapes, and output element types against
-     * the model contract before allocating reusable inference buffers.
-     *
-     * LiteRT exposes tensor dimensions through TensorType.layout.
-     */
-    private fun validateTensorContract() {
-        val contract = EfficientDetLite0ModelContract
+    private fun validateInputTensor() {
+        val inputTensor = interpreter.getInputTensor(0)
 
-        val inputType = model.getInputTensorType(
-            contract.INPUT_TENSOR_NAME
-        )
-
-        val expectedInputShape = listOf(
+        val expectedShape = intArrayOf(
             1,
-            contract.INPUT_HEIGHT,
-            contract.INPUT_WIDTH,
-            contract.INPUT_CHANNELS
+            EfficientDetLite0ModelContract.INPUT_HEIGHT,
+            EfficientDetLite0ModelContract.INPUT_WIDTH,
+            EfficientDetLite0ModelContract.INPUT_CHANNELS
         )
 
-        require(inputType.layout?.dimensions == expectedInputShape) {
-            "Unexpected input tensor shape for " +
-                    "${contract.INPUT_TENSOR_NAME}: " +
-                    "${inputType.layout?.dimensions}; " +
-                    "expected $expectedInputShape"
-        }
-
-        val classificationType = model.getOutputTensorType(
-            contract.CLASSIFICATION_OUTPUT_TENSOR_NAME
-        )
-
-        val expectedClassificationShape = listOf(
-            1,
-            contract.CLASSIFICATION_OUTPUT_ANCHORS,
-            contract.CLASSIFICATION_OUTPUT_CLASSES
-        )
-
-        require(
-            classificationType.elementType ==
-                    TensorType.ElementType.FLOAT
+        require(inputTensor.name() ==
+                EfficientDetLite0ModelContract.INPUT_TENSOR_NAME
         ) {
-            "Classification output must be FLOAT32, got " +
-                    classificationType.elementType
+            "Unexpected input tensor name: ${inputTensor.name()}"
         }
 
-        require(
-            classificationType.layout?.dimensions ==
-                    expectedClassificationShape
-        ) {
-            "Unexpected classification tensor shape: " +
-                    "${classificationType.layout?.dimensions}; " +
-                    "expected $expectedClassificationShape"
+        require(inputTensor.dataType() == DataType.UINT8) {
+            "Expected UINT8 input, got ${inputTensor.dataType()}"
         }
 
-        val boxType = model.getOutputTensorType(
-            contract.BOX_OUTPUT_TENSOR_NAME
-        )
-
-        val expectedBoxShape = listOf(
-            1,
-            contract.BOX_OUTPUT_ANCHORS,
-            contract.BOX_OUTPUT_VALUES
-        )
-
-        require(boxType.elementType == TensorType.ElementType.FLOAT) {
-            "Box-regression output must be FLOAT32, got " +
-                    boxType.elementType
-        }
-
-        require(boxType.layout?.dimensions == expectedBoxShape) {
-            "Unexpected box-regression tensor shape: " +
-                    "${boxType.layout?.dimensions}; " +
-                    "expected $expectedBoxShape"
+        require(inputTensor.shape().contentEquals(expectedShape)) {
+            "Unexpected input tensor shape: " +
+                    "${inputTensor.shape().contentToString()}; " +
+                    "expected ${expectedShape.contentToString()}"
         }
     }
 
+    private fun findOutputIndex(
+        expectedName: String,
+        expectedShape: IntArray
+    ): Int {
+        val matchingIndices = (0 until interpreter.outputTensorCount)
+            .filter { index ->
+                interpreter.getOutputTensor(index).name() == expectedName
+            }
+
+        require(matchingIndices.size == 1) {
+            "Expected exactly one output named $expectedName; " +
+                    "found ${matchingIndices.size}"
+        }
+
+        val outputIndex = matchingIndices.single()
+        val tensor = interpreter.getOutputTensor(outputIndex)
+
+        require(tensor.dataType() == DataType.FLOAT32) {
+            "Expected FLOAT32 output for $expectedName, " +
+                    "got ${tensor.dataType()}"
+        }
+
+        require(tensor.shape().contentEquals(expectedShape)) {
+            "Unexpected shape for $expectedName: " +
+                    "${tensor.shape().contentToString()}; " +
+                    "expected ${expectedShape.contentToString()}"
+        }
+
+        return outputIndex
+    }
+
+    private fun loadModelBuffer(
+        context: Context
+    ): ByteBuffer {
+        val modelBytes = context.assets.open(
+            EfficientDetLite0ModelContract.MODEL_ASSET_NAME
+        ).use { inputStream ->
+            inputStream.readBytes()
+        }
+
+        return ByteBuffer.allocateDirect(modelBytes.size)
+            .order(ByteOrder.nativeOrder())
+            .apply {
+                put(modelBytes)
+                rewind()
+            }
+    }
+
     override fun close() {
-        outputBuffers.values.forEach { it.close() }
-        inputBuffers.values.forEach { it.close() }
-        model.close()
+        interpreter.close()
     }
 }
