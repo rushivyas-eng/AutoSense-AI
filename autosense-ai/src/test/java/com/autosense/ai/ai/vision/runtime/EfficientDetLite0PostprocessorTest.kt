@@ -10,21 +10,28 @@ class EfficientDetLite0PostprocessorTest {
     @Test
     fun process_filtersBackgroundAndMapsDetectionToSourceCoordinates() {
         val contract = EfficientDetLite0ModelContract
+
         val scores = FloatArray(
             contract.CLASSIFICATION_OUTPUT_ANCHORS *
-                contract.CLASSIFICATION_OUTPUT_CLASSES
-        ) { -20f }
-        val boxes = FloatArray(
-            contract.BOX_OUTPUT_ANCHORS * contract.BOX_OUTPUT_VALUES
+                    contract.CLASSIFICATION_OUTPUT_CLASSES
         )
 
-        // Anchor 0: background wins and must not produce a detection.
-        scores[0] = 20f
+        val boxes = FloatArray(
+            contract.BOX_OUTPUT_ANCHORS *
+                    contract.BOX_OUTPUT_VALUES
+        )
 
-        // Anchor 1: foreground class 1 wins and should survive NMS.
-        val foregroundOffset = contract.CLASSIFICATION_OUTPUT_CLASSES
-        scores[foregroundOffset] = -20f
-        scores[foregroundOffset + 1] = 10f
+        // Anchor 0: background has the highest score.
+        // It must not produce a detection.
+        scores[0] = 0.99f
+
+        // Anchor 1: foreground class 1 has the highest score.
+        // Scores represent activated model outputs, not logits.
+        val foregroundOffset =
+            contract.CLASSIFICATION_OUTPUT_CLASSES
+
+        scores[foregroundOffset] = 0.01f
+        scores[foregroundOffset + 1] = 0.90f
 
         val transform = VisionTransform(
             sourceWidth = 640,
@@ -46,14 +53,46 @@ class EfficientDetLite0PostprocessorTest {
             inferenceTimeMs = 7
         )
 
-        val detections = EfficientDetLite0Postprocessor().process(output, transform)
+        val detections =
+            EfficientDetLite0Postprocessor().process(output, transform)
 
-        assertTrue(detections.isNotEmpty())
-        assertTrue(detections.none { it.classId == 0 })
-        assertTrue(detections.all { it.left in 0f..1f && it.right in 0f..1f })
-        assertTrue(detections.all { it.top in 0f..1f && it.bottom in 0f..1f })
-        assertTrue(detections.all { it.left < it.right && it.top < it.bottom })
+        assertTrue(
+            "The foreground prediction should survive postprocessing",
+            detections.isNotEmpty()
+        )
+
+        assertTrue(
+            "Background class must not produce detections",
+            detections.none { it.classId == 0 }
+        )
+
+        assertTrue(
+            "All horizontal coordinates must be normalized",
+            detections.all {
+                it.left in 0f..1f && it.right in 0f..1f
+            }
+        )
+
+        assertTrue(
+            "All vertical coordinates must be normalized",
+            detections.all {
+                it.top in 0f..1f && it.bottom in 0f..1f
+            }
+        )
+
+        assertTrue(
+            "Every bounding box must have positive dimensions",
+            detections.all {
+                it.left < it.right && it.top < it.bottom
+            }
+        )
+
         assertEquals(1, detections.first().classId)
-        assertEquals(1.0f, detections.first().confidence, 0.001f)
+
+        assertEquals(
+            0.90f,
+            detections.first().confidence,
+            0.001f
+        )
     }
 }

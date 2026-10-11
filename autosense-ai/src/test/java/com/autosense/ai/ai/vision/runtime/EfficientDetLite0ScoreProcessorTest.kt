@@ -2,568 +2,201 @@ package com.autosense.ai.ai.vision.runtime
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Test
-import kotlin.math.exp
 
 class EfficientDetLite0ScoreProcessorTest {
 
     @Test
-    fun process_appliesSigmoidToWinningLogit() {
+    fun process_usesModelScoreDirectly() {
         val scores = createScores()
 
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 5,
-            score = 0.0f
-        )
+        setScore(scores, anchorIndex = 0, classId = 5, score = 0.8f)
 
-        val processor =
-            EfficientDetLite0ScoreProcessor(
-                scoreThreshold = 0.0f
-            )
+        val result = processor().process(scores)
 
-        val result = processor.process(scores)
-
-        assertEquals(
-            5,
-            result[0]?.classId
-        )
-
-        assertEquals(
-            0.5f,
-            result[0]?.score ?: Float.NaN,
-            EPSILON
-        )
+        assertEquals(5, result[0]?.classId)
+        assertEquals(0.8f, result[0]?.score ?: Float.NaN, EPSILON)
     }
 
     @Test
-    fun process_selectsHighestLogitBeforeApplyingSigmoid() {
+    fun process_selectsHighestScoringClass() {
         val scores = createScores()
 
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 5,
-            score = 2.0f
-        )
+        setScore(scores, 0, 5, 0.6f)
+        setScore(scores, 0, 12, 0.8f)
+        setScore(scores, 0, 20, 0.7f)
 
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 12,
-            score = 3.0f
-        )
+        val result = processor().process(scores)
 
-        val processor =
-            EfficientDetLite0ScoreProcessor(
-                scoreThreshold = 0.0f
-            )
-
-        val result = processor.process(scores)
-
-        assertEquals(
-            12,
-            result[0]?.classId
-        )
-
-        assertEquals(
-            sigmoid(3.0),
-            result[0]?.score?.toDouble() ?: Double.NaN,
-            EPSILON_DOUBLE
-        )
+        assertEquals(12, result[0]?.classId)
+        assertEquals(0.8f, result[0]?.score ?: Float.NaN, EPSILON)
     }
 
     @Test
-    fun process_negativeLogitProducesConfidenceBelowHalf() {
+    fun process_acceptsScoreExactlyAtThreshold() {
         val scores = createScores()
+        setScore(scores, 0, 7, 0.6f)
 
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 3,
-            score = -2.0f
-        )
+        val result = processor(threshold = 0.6f).process(scores)
 
-        val processor =
-            EfficientDetLite0ScoreProcessor(
-                scoreThreshold = 0.0f
-            )
-
-        val result = processor.process(scores)
-
-        assertEquals(
-            3,
-            result[0]?.classId
-        )
-
-        assertEquals(
-            sigmoid(-2.0),
-            result[0]?.score?.toDouble() ?: Double.NaN,
-            EPSILON_DOUBLE
-        )
+        assertEquals(7, result[0]?.classId)
+        assertEquals(0.6f, result[0]?.score ?: Float.NaN, EPSILON)
     }
 
     @Test
-    fun process_positiveLogitProducesConfidenceAboveHalf() {
+    fun process_rejectsScoreBelowThreshold() {
         val scores = createScores()
+        setScore(scores, 0, 7, 0.59f)
 
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 3,
-            score = 2.0f
-        )
-
-        val processor =
-            EfficientDetLite0ScoreProcessor(
-                scoreThreshold = 0.0f
-            )
-
-        val result = processor.process(scores)
-
-        assertEquals(
-            3,
-            result[0]?.classId
-        )
-
-        assertEquals(
-            sigmoid(2.0),
-            result[0]?.score?.toDouble() ?: Double.NaN,
-            EPSILON_DOUBLE
-        )
-    }
-
-    @Test
-    fun process_appliesThresholdAfterSigmoid() {
-        val scores = createScores()
-
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 7,
-            score = 0.0f
-        )
-
-        /*
-         * sigmoid(0) = 0.5
-         *
-         * Threshold is 0.6, so the candidate must be rejected.
-         */
-        val processor =
-            EfficientDetLite0ScoreProcessor(
-                scoreThreshold = 0.6f
-            )
-
-        val result = processor.process(scores)
+        val result = processor(threshold = 0.6f).process(scores)
 
         assertNull(result[0])
-    }
-
-    @Test
-    fun process_acceptsConfidenceExactlyAtThreshold() {
-        val scores = createScores()
-
-        val logit =
-            kotlin.math.ln(0.6 / 0.4).toFloat()
-
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 7,
-            score = logit
-        )
-
-        val processor =
-            EfficientDetLite0ScoreProcessor(
-                scoreThreshold = 0.6f
-            )
-
-        val result = processor.process(scores)
-
-        assertEquals(
-            7,
-            result[0]?.classId
-        )
-
-        assertEquals(
-            0.6f,
-            result[0]?.score ?: Float.NaN,
-            EPSILON
-        )
     }
 
     @Test
     fun process_handlesMultipleAnchorsIndependently() {
         val scores = createScores()
 
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 2,
-            score = 1.0f
-        )
+        setScore(scores, 0, 2, 0.7f)
+        setScore(scores, 1, 8, 0.9f)
+        setScore(scores, 2, 15, 0.4f)
 
-        setScore(
-            scores = scores,
-            anchorIndex = 1,
-            classId = 8,
-            score = 2.0f
-        )
+        val result = processor(threshold = 0.5f).process(scores)
 
-        setScore(
-            scores = scores,
-            anchorIndex = 2,
-            classId = 15,
-            score = -1.0f
-        )
+        assertEquals(2, result[0]?.classId)
+        assertEquals(0.7f, result[0]?.score ?: Float.NaN, EPSILON)
 
-        val processor =
-            EfficientDetLite0ScoreProcessor(
-                scoreThreshold = 0.0f
-            )
+        assertEquals(8, result[1]?.classId)
+        assertEquals(0.9f, result[1]?.score ?: Float.NaN, EPSILON)
 
-        val result = processor.process(scores)
-
-        assertEquals(
-            2,
-            result[0]?.classId
-        )
-
-        assertEquals(
-            sigmoid(1.0),
-            result[0]?.score?.toDouble() ?: Double.NaN,
-            EPSILON_DOUBLE
-        )
-
-        assertEquals(
-            8,
-            result[1]?.classId
-        )
-
-        assertEquals(
-            sigmoid(2.0),
-            result[1]?.score?.toDouble() ?: Double.NaN,
-            EPSILON_DOUBLE
-        )
-
-        assertEquals(
-            15,
-            result[2]?.classId
-        )
-
-        assertEquals(
-            sigmoid(-1.0),
-            result[2]?.score?.toDouble() ?: Double.NaN,
-            EPSILON_DOUBLE
-        )
+        assertNull(result[2])
     }
 
     @Test
-    fun process_usesFirstClassWhenLogitsAreEqual() {
+    fun process_usesFirstClassWhenScoresAreEqual() {
         val scores = createScores()
 
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 4,
-            score = 0.75f
-        )
+        setScore(scores, 0, 4, 0.75f)
+        setScore(scores, 0, 9, 0.75f)
 
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 9,
-            score = 0.75f
-        )
+        val result = processor(threshold = 0.5f).process(scores)
 
-        val processor =
-            EfficientDetLite0ScoreProcessor(
-                scoreThreshold = 0.5f
-            )
-
-        val result = processor.process(scores)
-
-        assertEquals(
-            4,
-            result[0]?.classId
-        )
+        assertEquals(4, result[0]?.classId)
+        assertEquals(0.75f, result[0]?.score ?: Float.NaN, EPSILON)
     }
 
     @Test
-    fun process_allZeroLogitsFilterBackgroundClass() {
-        /*
-         * This test intentionally uses every class = 0.
-         * Class 0 wins the tie, but class 0 is EfficientDet's
-         * background class and must not produce a detection.
-         */
-        val scores = FloatArray(
-            EfficientDetLite0ModelContract.CLASSIFICATION_OUTPUT_ANCHORS *
-                    EfficientDetLite0ModelContract.CLASSIFICATION_OUTPUT_CLASSES
-        )
+    fun process_excludesBackgroundClass() {
+        val scores = createScores()
 
-        val processor =
-            EfficientDetLite0ScoreProcessor(
-                scoreThreshold = 0.5f
-            )
+        setScore(scores, 0, 0, 0.9f)
+        setScore(scores, 0, 5, 0.8f)
 
-        val result = processor.process(scores)
+        val result = processor().process(scores)
+
+        // The highest-scoring class is background, so this anchor
+        // must not produce a detection.
+        assertNull(result[0])
+    }
+
+    @Test
+    fun process_excludesAnchorWhenAllScoresAreZero() {
+        val scores = FloatArray(expectedScoreCount())
+
+        val result = processor(threshold = 0.5f).process(scores)
 
         assertNull(result[0])
     }
 
     @Test
-    fun process_backgroundHighestDoesNotProduceCandidate() {
+    fun process_preservesHighestForegroundClass() {
         val scores = createScores()
 
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 0,
-            score = 10.0f
-        )
+        setScore(scores, 0, 0, 0.3f)
+        setScore(scores, 0, 89, 0.95f)
 
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 1,
-            score = 5.0f
-        )
+        val result = processor().process(scores)
 
-        val processor =
-            EfficientDetLite0ScoreProcessor(
-                scoreThreshold = 0.0f
-            )
-
-        val result = processor.process(scores)
-
-        assertNull(result[0])
+        assertEquals(89, result[0]?.classId)
+        assertEquals(0.95f, result[0]?.score ?: Float.NaN, EPSILON)
     }
 
     @Test
-    fun process_foregroundClassWinsOverBackground() {
+    fun process_rejectsScoreAboveOne() {
         val scores = createScores()
+        setScore(scores, 0, 2, 1.1f)
 
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 0,
-            score = 5.0f
-        )
-
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 3,
-            score = 10.0f
-        )
-
-        val processor =
-            EfficientDetLite0ScoreProcessor(
-                scoreThreshold = 0.0f
-            )
-
-        val result = processor.process(scores)
-
-        assertEquals(
-            3,
-            result[0]?.classId
-        )
-
-        assertEquals(
-            sigmoid(10.0),
-            result[0]?.score?.toDouble() ?: Double.NaN,
-            EPSILON_DOUBLE
-        )
+        assertThrows(IllegalArgumentException::class.java) {
+            processor().process(scores)
+        }
     }
 
     @Test
-    fun process_foregroundClass89IsPreserved() {
+    fun process_rejectsNegativeScore() {
         val scores = createScores()
+        setScore(scores, 0, 2, -0.1f)
 
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 0,
-            score = 1.0f
-        )
-
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 89,
-            score = 2.0f
-        )
-
-        val processor =
-            EfficientDetLite0ScoreProcessor(
-                scoreThreshold = 0.0f
-            )
-
-        val result = processor.process(scores)
-
-        assertEquals(
-            89,
-            result[0]?.classId
-        )
+        assertThrows(IllegalArgumentException::class.java) {
+            processor().process(scores)
+        }
     }
 
     @Test
-    fun process_largePositiveLogitApproachesOne() {
+    fun process_rejectsNaNScore() {
         val scores = createScores()
+        setScore(scores, 0, 2, Float.NaN)
 
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 2,
-            score = 100.0f
-        )
-
-        val processor =
-            EfficientDetLite0ScoreProcessor()
-
-        val result = processor.process(scores)
-
-        assertEquals(
-            1.0f,
-            result[0]?.score ?: Float.NaN,
-            EPSILON
-        )
+        assertThrows(IllegalArgumentException::class.java) {
+            processor().process(scores)
+        }
     }
 
     @Test
-    fun process_largeNegativeLogitApproachesZero() {
+    fun process_rejectsInfiniteScore() {
         val scores = createScores()
+        setScore(scores, 0, 2, Float.POSITIVE_INFINITY)
 
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 2,
-            score = -100.0f
-        )
-
-        val processor =
-            EfficientDetLite0ScoreProcessor()
-
-        val result = processor.process(scores)
-
-        assertEquals(
-            2,
-            result[0]?.classId
-        )
-
-        assertEquals(
-            0.0f,
-            result[0]?.score ?: Float.NaN,
-            EPSILON
-        )
+        assertThrows(IllegalArgumentException::class.java) {
+            processor().process(scores)
+        }
     }
 
     @Test
     fun process_rejectsInvalidScoreArraySize() {
-        try {
-            EfficientDetLite0ScoreProcessor()
-                .process(FloatArray(10))
-        } catch (exception: IllegalArgumentException) {
-            return
+        assertThrows(IllegalArgumentException::class.java) {
+            processor().process(FloatArray(10))
         }
-
-        throw AssertionError(
-            "Expected IllegalArgumentException"
-        )
-    }
-
-    @Test
-    fun process_rejectsNaNLogit() {
-        val scores = createScores()
-
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 2,
-            score = Float.NaN
-        )
-
-        try {
-            EfficientDetLite0ScoreProcessor()
-                .process(scores)
-        } catch (exception: IllegalArgumentException) {
-            return
-        }
-
-        throw AssertionError(
-            "Expected IllegalArgumentException"
-        )
-    }
-
-    @Test
-    fun process_rejectsInfiniteLogit() {
-        val scores = createScores()
-
-        setScore(
-            scores = scores,
-            anchorIndex = 0,
-            classId = 2,
-            score = Float.POSITIVE_INFINITY
-        )
-
-        try {
-            EfficientDetLite0ScoreProcessor()
-                .process(scores)
-        } catch (exception: IllegalArgumentException) {
-            return
-        }
-
-        throw AssertionError(
-            "Expected IllegalArgumentException"
-        )
     }
 
     @Test
     fun constructor_rejectsNegativeThreshold() {
-        try {
-            EfficientDetLite0ScoreProcessor(
-                scoreThreshold = -0.1f
-            )
-        } catch (exception: IllegalArgumentException) {
-            return
+        assertThrows(IllegalArgumentException::class.java) {
+            processor(threshold = -0.1f)
         }
-
-        throw AssertionError(
-            "Expected IllegalArgumentException"
-        )
     }
 
     @Test
     fun constructor_rejectsThresholdAboveOne() {
-        try {
-            EfficientDetLite0ScoreProcessor(
-                scoreThreshold = 1.1f
-            )
-        } catch (exception: IllegalArgumentException) {
-            return
-        }
-
-        throw AssertionError(
-            "Expected IllegalArgumentException"
-        )
-    }
-
-    private fun createScores(): FloatArray {
-        /*
-         * Give every unspecified class a very low but finite logit.
-         *
-         * This ensures that a test-specific logit is actually the
-         * winning class without introducing infinities into the
-         * model output.
-         */
-        return FloatArray(
-            EfficientDetLite0ModelContract.CLASSIFICATION_OUTPUT_ANCHORS *
-                    EfficientDetLite0ModelContract.CLASSIFICATION_OUTPUT_CLASSES
-        ) {
-            UNSPECIFIED_LOGIT
+        assertThrows(IllegalArgumentException::class.java) {
+            processor(threshold = 1.1f)
         }
     }
+
+    private fun processor(
+        threshold: Float = 0.0f
+    ) = EfficientDetLite0ScoreProcessor(
+        scoreThreshold = threshold
+    )
+
+    private fun createScores(): FloatArray =
+        FloatArray(expectedScoreCount()) {
+            UNSPECIFIED_SCORE
+        }
+
+    private fun expectedScoreCount(): Int =
+        EfficientDetLite0ModelContract.CLASSIFICATION_OUTPUT_ANCHORS *
+                EfficientDetLite0ModelContract.CLASSIFICATION_OUTPUT_CLASSES
 
     private fun setScore(
         scores: FloatArray,
@@ -574,23 +207,11 @@ class EfficientDetLite0ScoreProcessorTest {
         val numClasses =
             EfficientDetLite0ModelContract.CLASSIFICATION_OUTPUT_CLASSES
 
-        scores[
-            anchorIndex * numClasses + classId
-        ] = score
+        scores[anchorIndex * numClasses + classId] = score
     }
 
-    private fun sigmoid(value: Double): Double {
-        return if (value >= 0.0) {
-            1.0 / (1.0 + exp(-value))
-        } else {
-            val exponential = exp(value)
-            exponential / (1.0 + exponential)
-        }
-    }
-
-    companion object {
-        private const val EPSILON = 0.0001f
-        private const val EPSILON_DOUBLE = 0.0001
-        private const val UNSPECIFIED_LOGIT = -200.0f
+    private companion object {
+        const val EPSILON = 0.0001f
+        const val UNSPECIFIED_SCORE = 0.0f
     }
 }
