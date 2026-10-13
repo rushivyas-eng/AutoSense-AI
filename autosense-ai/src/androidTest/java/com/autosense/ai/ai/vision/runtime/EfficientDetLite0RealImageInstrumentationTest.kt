@@ -2,6 +2,9 @@ package com.autosense.ai.ai.vision.runtime
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -9,10 +12,12 @@ import com.autosense.ai.api.camera.CameraFrame
 import com.autosense.ai.api.camera.FrameData
 import com.autosense.ai.api.camera.FrameFormat
 import com.autosense.ai.api.camera.FramePlane
+import com.autosense.ai.api.vision.Detection
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.Closeable
+import java.io.File
 import java.nio.ByteBuffer
 
 @RunWith(AndroidJUnit4::class)
@@ -49,7 +54,7 @@ class EfficientDetLite0RealImageInstrumentationTest {
             frame.use { inputFrame ->
                 EfficientDetLite0VisionEngine(
                     context = context,
-                    labelForClass = { classId -> "class_$classId" }
+                    labelForClass = EfficientDetLite0LabelMap::getLabel
                 ).use { engine ->
                     val result = engine.process(inputFrame)
 
@@ -115,11 +120,165 @@ class EfficientDetLite0RealImageInstrumentationTest {
                                         "${box.right},${box.bottom})"
                             )
                         }
+
+                    val annotatedBitmap = createAnnotatedBitmap(
+                        source = bitmap,
+                        detections = result.detections
+                    )
+
+                    try {
+                        val outputDirectory = context.filesDir
+
+                        val outputFile = File(
+                            outputDirectory,
+                            ANNOTATED_IMAGE_FILENAME
+                        )
+
+                        outputFile.outputStream().buffered().use { output ->
+                            val compressed = annotatedBitmap.compress(
+                                Bitmap.CompressFormat.JPEG,
+                                JPEG_QUALITY,
+                                output
+                            )
+
+                            check(compressed) {
+                                "Failed to encode annotated image"
+                            }
+                        }
+
+                        Log.i(
+                            TAG,
+                            "Annotated image saved: ${outputFile.absolutePath}"
+                        )
+
+                        // Export the JPEG through Logcat so it can be recovered
+                        // even when the instrumentation package is inaccessible
+                        // through `run-as`.
+                        val imageBytes = outputFile.readBytes()
+                        val base64Image = android.util.Base64.encodeToString(
+                            imageBytes,
+                            android.util.Base64.NO_WRAP
+                        )
+
+                        base64Image.chunked(BASE64_CHUNK_SIZE)
+                            .forEachIndexed { index, chunk ->
+                                Log.i(
+                                    IMAGE_EXPORT_TAG,
+                                    "CHUNK:$index:$chunk"
+                                )
+                            }
+
+                        Log.i(
+                            IMAGE_EXPORT_TAG,
+                            "EXPORT_COMPLETE:${imageBytes.size}:${base64Image.length}"
+                        )
+                    } finally {
+                        annotatedBitmap.recycle()
+                    }
                 }
             }
         } finally {
             bitmap.recycle()
         }
+    }
+
+    /**
+     * Draws the highest-confidence detections on a copy of the source image.
+     *
+     * Public detection coordinates are normalized to [0, 1] relative
+     * to the original frame.
+     */
+    private fun createAnnotatedBitmap(
+        source: Bitmap,
+        detections: List<Detection>
+    ): Bitmap {
+        val annotated = source.copy(
+            Bitmap.Config.ARGB_8888,
+            true
+        ) ?: error("Failed to copy source bitmap")
+
+        val canvas = Canvas(annotated)
+
+        val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.GREEN
+            style = Paint.Style.STROKE
+            strokeWidth = BOX_STROKE_WIDTH
+        }
+
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = LABEL_TEXT_SIZE
+            style = Paint.Style.FILL
+        }
+
+        val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.BLACK
+            style = Paint.Style.FILL
+        }
+
+        val labelPadding = LABEL_PADDING
+        val labelHeight = LABEL_TEXT_SIZE + labelPadding * 2
+
+        detections
+            .sortedByDescending { it.confidence }
+            .take(MAX_ANNOTATED_DETECTIONS)
+            .forEach { detection ->
+                val box = detection.boundingBox
+
+                val left = box.left * source.width
+                val top = box.top * source.height
+                val right = box.right * source.width
+                val bottom = box.bottom * source.height
+
+                canvas.drawRect(
+                    left,
+                    top,
+                    right,
+                    bottom,
+                    boxPaint
+                )
+
+                val label =
+                    "${detection.label} " +
+                            "${(detection.confidence * 100).toInt()}%"
+
+                val textWidth = textPaint.measureText(label)
+                val labelWidth = textWidth + labelPadding * 2
+
+                // Prefer placing the label above the box.
+                // If the box is near the top, place it inside.
+                val labelTop = if (top >= labelHeight) {
+                    top - labelHeight
+                } else {
+                    top
+                }
+
+                // Keep the label background inside the image.
+                val labelLeft = left.coerceAtMost(
+                    (source.width - labelWidth).coerceAtLeast(0f)
+                )
+
+                val labelBottom = (labelTop + labelHeight)
+                    .coerceAtMost(source.height.toFloat())
+
+                canvas.drawRect(
+                    labelLeft,
+                    labelTop,
+                    (labelLeft + labelWidth)
+                        .coerceAtMost(source.width.toFloat()),
+                    labelBottom,
+                    backgroundPaint
+                )
+
+                canvas.drawText(
+                    label,
+                    labelLeft + labelPadding,
+                    labelTop + labelPadding + LABEL_TEXT_SIZE,
+                    textPaint
+                )
+            }
+
+        return annotated
     }
 
     private fun bitmapToCameraFrame(
@@ -232,7 +391,19 @@ class EfficientDetLite0RealImageInstrumentationTest {
 
     private companion object {
         const val TAG = "AutoSenseRealImageTest"
+        const val IMAGE_EXPORT_TAG = "AutoSenseImageExport"
+
+        const val BASE64_CHUNK_SIZE = 3000
         const val TEST_IMAGE_ASSET = "vision_test.jpg"
+        const val ANNOTATED_IMAGE_FILENAME = "vision_test_annotated.jpg"
+
         const val MAX_LOGGED_DETECTIONS = 20
+        const val MAX_ANNOTATED_DETECTIONS = 20
+
+        const val BOX_STROKE_WIDTH = 3f
+        const val LABEL_TEXT_SIZE = 16f
+        const val LABEL_PADDING = 4f
+
+        const val JPEG_QUALITY = 95
     }
 }

@@ -33,7 +33,7 @@ class EfficientDetLite0VisionEngineInstrumentationTest {
 
         EfficientDetLite0VisionEngine(
             context = context,
-            labelForClass = { classId -> "class_$classId" }
+            labelForClass = EfficientDetLite0LabelMap::getLabel
         ).use { engine ->
 
             frame.use { inputFrame ->
