@@ -8,7 +8,7 @@ import org.junit.Test
 class EfficientDetLite0PostprocessorTest {
 
     @Test
-    fun process_filtersBackgroundAndMapsDetectionToSourceCoordinates() {
+    fun process_keepsClassZeroAndMapsDetectionToSourceCoordinates() {
         val contract = EfficientDetLite0ModelContract
 
         val scores = FloatArray(
@@ -21,12 +21,10 @@ class EfficientDetLite0PostprocessorTest {
                     contract.BOX_OUTPUT_VALUES
         )
 
-        // Anchor 0: background has the highest score.
-        // It must not produce a detection.
+        // Anchor 0: class 0 is a valid foreground class.
         scores[0] = 0.99f
 
-        // Anchor 1: foreground class 1 has the highest score.
-        // Scores represent activated model outputs, not logits.
+        // Anchor 1: class 1 is another valid foreground class.
         val foregroundOffset =
             contract.CLASSIFICATION_OUTPUT_CLASSES
 
@@ -57,13 +55,18 @@ class EfficientDetLite0PostprocessorTest {
             EfficientDetLite0Postprocessor().process(output, transform)
 
         assertTrue(
-            "The foreground prediction should survive postprocessing",
+            "Valid foreground predictions should survive postprocessing",
             detections.isNotEmpty()
         )
 
         assertTrue(
-            "Background class must not produce detections",
-            detections.none { it.classId == 0 }
+            "Class 0 should remain a valid detection",
+            detections.any { it.classId == 0 }
+        )
+
+        assertTrue(
+            "Class 1 should remain a valid detection",
+            detections.any { it.classId == 1 }
         )
 
         assertTrue(
@@ -87,11 +90,12 @@ class EfficientDetLite0PostprocessorTest {
             }
         )
 
-        assertEquals(1, detections.first().classId)
+        val classZeroDetection =
+            detections.first { it.classId == 0 }
 
         assertEquals(
-            0.90f,
-            detections.first().confidence,
+            0.99f,
+            classZeroDetection.confidence,
             0.001f
         )
     }

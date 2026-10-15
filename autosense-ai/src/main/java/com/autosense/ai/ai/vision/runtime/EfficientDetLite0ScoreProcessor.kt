@@ -11,10 +11,23 @@ internal class EfficientDetLite0ScoreProcessor(
 
     init {
         require(scoreThreshold in 0.0f..1.0f) {
-            "scoreThreshold must be between 0 and 1"
+            "Score threshold must be between 0 and 1"
         }
     }
 
+    /**
+     * Selects the highest-scoring class for each anchor.
+     *
+     * The model's classification output already passes through a LOGISTIC
+     * operator. Therefore, scores are probabilities and must not be passed
+     * through sigmoid again.
+     *
+     * Class IDs correspond directly to the model's label map.
+     * In particular, class ID 0 is a valid class, not a background class.
+     *
+     * Anchors whose highest score is below the configured threshold are
+     * excluded by returning null for those anchors.
+     */
     fun process(
         classificationScores: FloatArray
     ): Array<EfficientDetLite0ClassScore?> {
@@ -23,17 +36,17 @@ internal class EfficientDetLite0ScoreProcessor(
                     EfficientDetLite0ModelContract.CLASSIFICATION_OUTPUT_CLASSES
 
         require(classificationScores.size == expectedSize) {
-            "Classification score size ${classificationScores.size} " +
-                    "does not match expected size $expectedSize"
+            "Expected $expectedSize classification scores, " +
+                    "but received ${classificationScores.size}"
         }
+
+        val numClasses =
+            EfficientDetLite0ModelContract.CLASSIFICATION_OUTPUT_CLASSES
 
         val result =
             arrayOfNulls<EfficientDetLite0ClassScore>(
                 EfficientDetLite0ModelContract.CLASSIFICATION_OUTPUT_ANCHORS
             )
-
-        val numClasses =
-            EfficientDetLite0ModelContract.CLASSIFICATION_OUTPUT_CLASSES
 
         for (anchorIndex in result.indices) {
             val offset = anchorIndex * numClasses
@@ -49,8 +62,7 @@ internal class EfficientDetLite0ScoreProcessor(
                 }
 
                 require(score in 0.0f..1.0f) {
-                    "Classification score must be between 0 and 1; " +
-                            "got $score"
+                    "Classification score must be between 0 and 1; got $score"
                 }
 
                 if (score > bestScore) {
@@ -59,16 +71,11 @@ internal class EfficientDetLite0ScoreProcessor(
                 }
             }
 
-            if (bestClassId == BACKGROUND_CLASS_ID) {
-                continue
-            }
-
             if (bestScore >= scoreThreshold) {
-                result[anchorIndex] =
-                    EfficientDetLite0ClassScore(
-                        classId = bestClassId,
-                        score = bestScore
-                    )
+                result[anchorIndex] = EfficientDetLite0ClassScore(
+                    classId = bestClassId,
+                    score = bestScore
+                )
             }
         }
 
@@ -76,15 +83,11 @@ internal class EfficientDetLite0ScoreProcessor(
     }
 
     companion object {
-        private const val BACKGROUND_CLASS_ID = 0
-
-        /*
-         * The model's classification output already passes through
-         * a LOGISTIC operator. Do not apply sigmoid a second time.
+        /**
+         * Leave the initial threshold permissive.
          *
-         * Keep the model post-processing threshold configurable.
-         * Application-level detection policy can apply a stricter
-         * threshold later.
+         * EfficientDetLite0Nms applies its own score threshold before
+         * producing final detections.
          */
         const val DEFAULT_SCORE_THRESHOLD = 0.0f
     }
